@@ -2,15 +2,17 @@ package consumers
 
 import "log"
 
-type StdoutLogger struct {
+// LineLogger is a LineConsumer that writes each received line to a *log.Logger.
+// The prefix is prepended to every line and is also returned by Name().
+type LineLogger struct {
 	inputCh chan string
 	Logger  *log.Logger
 	prefix  string
 	done    chan struct{}
 }
 
-func NewStdoutLogger(prefix string, queueSize int) *StdoutLogger {
-	return &StdoutLogger{
+func NewLineLogger(prefix string, queueSize int) *LineLogger {
+	return &LineLogger{
 		inputCh: make(chan string, queueSize),
 		Logger:  log.Default(),
 		prefix:  prefix,
@@ -18,23 +20,21 @@ func NewStdoutLogger(prefix string, queueSize int) *StdoutLogger {
 	}
 }
 
-func (l *StdoutLogger) Name() string {
-	return "StdoutLogger"
+func (l *LineLogger) Name() string {
+	return l.prefix
 }
 
-func (l *StdoutLogger) InputCh() chan string {
+func (l *LineLogger) InputCh() chan string {
 	return l.inputCh
 }
 
-func (l *StdoutLogger) Start() {
+func (l *LineLogger) Start() {
 	defer close(l.done)
-	name := l.Name()
 	for line := range l.inputCh {
-		l.Logger.Printf("%s:%s:%s", name, l.prefix, line)
+		l.Logger.Printf("%s: %s", l.prefix, line)
 	}
-	l.Logger.Printf("Shutting down logger")
 }
 
-func (l *StdoutLogger) Wait() {
+func (l *LineLogger) Wait() {
 	<-l.done
 }

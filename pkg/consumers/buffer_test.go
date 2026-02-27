@@ -5,7 +5,7 @@ import (
 )
 
 func TestBufferedConsumer(t *testing.T) {
-	b := NewBufferedConsumer(10)
+	b := NewBufferedConsumer("test", 10)
 	go b.Start()
 
 	lines := []string{"foo", "bar", "baz"}

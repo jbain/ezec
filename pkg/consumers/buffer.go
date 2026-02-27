@@ -9,19 +9,21 @@ type BufferedConsumer struct {
 	inputCh chan string
 	mu      sync.Mutex
 	lines   []string
+	name    string
 	done    chan struct{}
 }
 
-func NewBufferedConsumer(queueSize int) *BufferedConsumer {
+func NewBufferedConsumer(name string, queueSize int) *BufferedConsumer {
 	return &BufferedConsumer{
 		inputCh: make(chan string, queueSize),
 		lines:   make([]string, 0),
+		name:    name,
 		done:    make(chan struct{}),
 	}
 }
 
 func (b *BufferedConsumer) Name() string {
-	return "BufferedConsumer"
+	return b.name
 }
 
 func (b *BufferedConsumer) InputCh() chan string {

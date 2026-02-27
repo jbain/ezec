@@ -22,7 +22,7 @@ func TestBasicExecution(t *testing.T) {
 }
 
 func TestStdoutConsumer(t *testing.T) {
-	buf := consumers.NewBufferedConsumer(10)
+	buf := consumers.NewBufferedConsumer("test", 10)
 	go buf.Start()
 
 	c := Command("echo", sliceArgs{"hello", "world"})
@@ -46,7 +46,7 @@ func TestStdoutConsumer(t *testing.T) {
 }
 
 func TestStderrConsumer(t *testing.T) {
-	buf := consumers.NewBufferedConsumer(10)
+	buf := consumers.NewBufferedConsumer("test", 10)
 	go buf.Start()
 
 	c := Command("sh", sliceArgs{"-c", "echo error line >&2"})
@@ -70,7 +70,7 @@ func TestStderrConsumer(t *testing.T) {
 }
 
 func TestExtraFilesConsumer(t *testing.T) {
-	buf := consumers.NewBufferedConsumer(10)
+	buf := consumers.NewBufferedConsumer("test", 10)
 	go buf.Start()
 
 	// fd 3 is the first ExtraFiles entry (stdin=0, stdout=1, stderr=2).

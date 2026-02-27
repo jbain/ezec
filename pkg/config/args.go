@@ -7,6 +7,5 @@ type StringArgs struct {
 }
 
 func (s StringArgs) Args() []string {
-	strs := strings.Split(s.String, " ")
-	return strs
+	return strings.Fields(s.String)
 }

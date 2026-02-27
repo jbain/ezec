@@ -13,16 +13,15 @@ func main() {
 		String: "-alh ../",
 	})
 
-	logParser := consumers.NewStdoutLogger("stdout", 100)
+	logParser := consumers.NewLineLogger("stdout", 100)
 	go logParser.Start()
 
 	lscmd.Stdout = []ezec.LineConsumer{
 		logParser,
 	}
 
-	err := lscmd.Start()
-	if err != nil {
-		log.Printf("error starting cmd: %s", err.Error())
+	if err := lscmd.Start(); err != nil {
+		log.Fatalf("error starting cmd: %s", err.Error())
 	}
 
 	if err := lscmd.Wait(); err != nil {
