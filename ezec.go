@@ -9,14 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
+	"time"
 )
 
 type Args interface {
 	Args() []string
-}
-
-type Env interface {
-	Env() []string
 }
 
 type LineConsumer interface {
@@ -25,17 +23,31 @@ type LineConsumer interface {
 }
 
 type Cmd struct {
-	cmd        *exec.Cmd
-	ctx        context.Context
-	Path       string
-	Args       Args
-	Env        Env
-	Dir        string
-	Stdin      io.Reader
+	cmd  *exec.Cmd
+	ctx  context.Context
+	wg   sync.WaitGroup
+
+	// Fields mirroring exec.Cmd. All are wired to the underlying exec.Cmd
+	// in Start(), so they can be set or modified after construction.
+	Path         string
+	Args         []string
+	Env          []string
+	Dir          string
+	Stdin        io.Reader
+	SysProcAttr  *syscall.SysProcAttr
+	WaitDelay    time.Duration
+	Cancel       func() error
+	Err          error
+
+	// Process is the underlying process. Set after a successful Start.
+	Process *os.Process
+	// ProcessState contains exit information. Set after Wait returns.
+	ProcessState *os.ProcessState
+
+	// ezec-specific: line consumers attached to each output stream.
 	Stdout     []LineConsumer
 	Stderr     []LineConsumer
 	ExtraFiles [][]LineConsumer
-	wg         sync.WaitGroup
 }
 
 func Command(name string, args Args) *Cmd {
@@ -44,7 +56,8 @@ func Command(name string, args Args) *Cmd {
 		cmd:        cmd,
 		ctx:        context.Background(),
 		Path:       cmd.Path,
-		Args:       args,
+		Args:       cmd.Args,
+		Err:        cmd.Err,
 		Stdout:     make([]LineConsumer, 0),
 		Stderr:     make([]LineConsumer, 0),
 		ExtraFiles: make([][]LineConsumer, 0),
@@ -57,7 +70,8 @@ func CommandContext(ctx context.Context, name string, args Args) *Cmd {
 		cmd:        cmd,
 		ctx:        ctx,
 		Path:       cmd.Path,
-		Args:       args,
+		Args:       cmd.Args,
+		Err:        cmd.Err,
 		Stdout:     make([]LineConsumer, 0),
 		Stderr:     make([]LineConsumer, 0),
 		ExtraFiles: make([][]LineConsumer, 0),
@@ -65,14 +79,22 @@ func CommandContext(ctx context.Context, name string, args Args) *Cmd {
 }
 
 func (c *Cmd) Start() error {
-	if c.Dir != "" {
-		c.cmd.Dir = c.Dir
+	// Wire all pass-through fields to the underlying exec.Cmd.
+	// Zero/nil values are the exec.Cmd defaults, so unconditional assignment
+	// is correct. Cancel and SysProcAttr are guarded: nil must not overwrite
+	// the default Cancel that exec.CommandContext installs.
+	c.cmd.Dir = c.Dir
+	c.cmd.Stdin = c.Stdin
+	c.cmd.Env = c.Env
+	c.cmd.Args = c.Args
+	if c.SysProcAttr != nil {
+		c.cmd.SysProcAttr = c.SysProcAttr
 	}
-	if c.Stdin != nil {
-		c.cmd.Stdin = c.Stdin
+	if c.WaitDelay != 0 {
+		c.cmd.WaitDelay = c.WaitDelay
 	}
-	if c.Env != nil {
-		c.cmd.Env = c.Env.Env()
+	if c.Cancel != nil {
+		c.cmd.Cancel = c.Cancel
 	}
 
 	// Only attach a pipe when consumers are registered for that stream.
@@ -142,6 +164,8 @@ func (c *Cmd) Start() error {
 		return err
 	}
 
+	c.Process = c.cmd.Process
+
 	// Close write ends in the parent — the child has inherited its own copies.
 	// Without this the consumer goroutines will never see EOF.
 	for _, w := range writeEnds {
@@ -175,7 +199,37 @@ func (c *Cmd) Start() error {
 // to avoid closing pipes before consumers have drained them.
 func (c *Cmd) Wait() error {
 	c.wg.Wait()
-	return c.cmd.Wait()
+	err := c.cmd.Wait()
+	c.ProcessState = c.cmd.ProcessState
+	return err
+}
+
+// Run starts the command and waits for it to complete.
+func (c *Cmd) Run() error {
+	if err := c.Start(); err != nil {
+		return err
+	}
+	return c.Wait()
+}
+
+// StdinPipe returns a pipe connected to the command's standard input.
+func (c *Cmd) StdinPipe() (io.WriteCloser, error) {
+	return c.cmd.StdinPipe()
+}
+
+// Environ returns the environment that would be used to run the command,
+// following exec.Cmd.Environ semantics.
+func (c *Cmd) Environ() []string {
+	// Sync fields that Environ reads before delegating.
+	c.cmd.Env = c.Env
+	c.cmd.Dir = c.Dir
+	return c.cmd.Environ()
+}
+
+// String returns a human-readable description of the command.
+func (c *Cmd) String() string {
+	c.cmd.Args = c.Args
+	return c.cmd.String()
 }
 
 func (c *Cmd) AddFd(consumers []LineConsumer) {
