@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"time"
 
 	"github.com/jbain/ezec"
 	"github.com/jbain/ezec/pkg/config"
@@ -26,5 +25,8 @@ func main() {
 		log.Printf("error starting cmd: %s", err.Error())
 	}
 
-	time.Sleep(5 * time.Second)
+	if err := lscmd.Wait(); err != nil {
+		log.Printf("error waiting for cmd: %s", err.Error())
+	}
+	logParser.Wait()
 }

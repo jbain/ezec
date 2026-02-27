@@ -2,6 +2,7 @@ package ezec
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -25,15 +26,14 @@ type LineConsumer interface {
 
 type Cmd struct {
 	cmd        *exec.Cmd
+	ctx        context.Context
 	Path       string
 	Args       Args
 	Env        Env
 	Dir        string
 	Stdin      io.Reader
 	Stdout     []LineConsumer
-	stdoutCh   chan string
 	Stderr     []LineConsumer
-	stderrCh   chan string
 	ExtraFiles [][]LineConsumer
 	wg         sync.WaitGroup
 }
@@ -43,9 +43,20 @@ func Command(name string, args Args) *Cmd {
 
 	return &Cmd{
 		cmd:        cmd,
+		ctx:        context.Background(),
 		Path:       cmd.Path,
-		stdoutCh:   make(chan string, 1000), //TODO make configurable
-		stderrCh:   make(chan string, 1000),
+		Stdout:     make([]LineConsumer, 0),
+		Stderr:     make([]LineConsumer, 0),
+		ExtraFiles: make([][]LineConsumer, 0),
+	}
+}
+
+func CommandContext(ctx context.Context, name string, args Args) *Cmd {
+	cmd := exec.CommandContext(ctx, name, args.Args()...)
+	return &Cmd{
+		cmd:        cmd,
+		ctx:        ctx,
+		Path:       cmd.Path,
 		Stdout:     make([]LineConsumer, 0),
 		Stderr:     make([]LineConsumer, 0),
 		ExtraFiles: make([][]LineConsumer, 0),
@@ -62,13 +73,23 @@ func (c *Cmd) Start() error {
 		return fmt.Errorf("failed to get StderrPipe: %w", err)
 	}
 
+	if c.Dir != "" {
+		c.cmd.Dir = c.Dir
+	}
+	if c.Stdin != nil {
+		c.cmd.Stdin = c.Stdin
+	}
+	if c.Env != nil {
+		c.cmd.Env = c.Env.Env()
+	}
+
 	if len(c.Stdout) > 0 {
 		c.wg.Add(1)
-		go func() { defer c.wg.Done(); consumePipe(outPipe, c.Stdout) }()
+		go func() { defer c.wg.Done(); consumePipe(c.ctx, outPipe, c.Stdout) }()
 	}
 	if len(c.Stderr) > 0 {
 		c.wg.Add(1)
-		go func() { defer c.wg.Done(); consumePipe(errPipe, c.Stderr) }()
+		go func() { defer c.wg.Done(); consumePipe(c.ctx, errPipe, c.Stderr) }()
 	}
 
 	writeEnds := make([]*os.File, 0, len(c.ExtraFiles))
@@ -82,7 +103,7 @@ func (c *Cmd) Start() error {
 		c.wg.Add(1)
 		go func(pipe *os.File, cons []LineConsumer) {
 			defer c.wg.Done()
-			consumePipe(pipe, cons)
+			consumePipe(c.ctx, pipe, cons)
 		}(r, consumers)
 	}
 
@@ -110,29 +131,26 @@ func (c *Cmd) AddFd(consumers []LineConsumer) {
 	c.ExtraFiles = append(c.ExtraFiles, consumers)
 }
 
-func consumePipe(read io.ReadCloser, consumers []LineConsumer) {
+func consumePipe(ctx context.Context, read io.ReadCloser, consumers []LineConsumer) {
 	scanner := bufio.NewScanner(read)
-
-	for {
-		if scanner.Scan() {
-			line := scanner.Text()
-			for _, parser := range consumers {
-				select {
-				case parser.InputCh() <- line:
-				default:
-					log.Printf("failed to write to parser '%s', channel full", parser.Name())
-				}
-			}
-		} else {
-			if scanner.Err() != nil {
-				log.Printf("consumer scan err: %s", scanner.Err().Error())
-			}
-			log.Printf("closing consumers")
-			for _, parser := range consumers {
-				log.Printf("closing parser: %s", parser.Name())
-				close(parser.InputCh())
-			}
-			return
+	defer func() {
+		for _, c := range consumers {
+			close(c.InputCh())
 		}
+	}()
+	for scanner.Scan() {
+		line := scanner.Text()
+		for _, parser := range consumers {
+			select {
+			case parser.InputCh() <- line:
+			case <-ctx.Done():
+				return
+			default:
+				log.Printf("failed to write to consumer '%s', channel full", parser.Name())
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("consumer scan err: %s", err.Error())
 	}
 }

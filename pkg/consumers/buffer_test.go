@@ -14,14 +14,7 @@ func TestBufferedConsumer(t *testing.T) {
 	}
 	close(b.InputCh())
 
-	// Wait for Start to drain the channel by checking Lines until settled.
-	// Since the channel is closed, the goroutine will exit shortly after.
-	// Use a simple spin to avoid importing sync/time primitives.
-	for {
-		if got := b.Lines(); len(got) == len(lines) {
-			break
-		}
-	}
+	b.Wait()
 
 	got := b.Lines()
 	if len(got) != len(lines) {

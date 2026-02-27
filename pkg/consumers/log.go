@@ -6,6 +6,7 @@ type StdoutLogger struct {
 	inputCh chan string
 	Logger  *log.Logger
 	prefix  string
+	done    chan struct{}
 }
 
 func NewStdoutLogger(prefix string, queueSize int) *StdoutLogger {
@@ -13,6 +14,7 @@ func NewStdoutLogger(prefix string, queueSize int) *StdoutLogger {
 		inputCh: make(chan string, queueSize),
 		Logger:  log.Default(),
 		prefix:  prefix,
+		done:    make(chan struct{}),
 	}
 }
 
@@ -25,9 +27,14 @@ func (l *StdoutLogger) InputCh() chan string {
 }
 
 func (l *StdoutLogger) Start() {
+	defer close(l.done)
 	name := l.Name()
 	for line := range l.inputCh {
 		l.Logger.Printf("%s:%s:%s", name, l.prefix, line)
 	}
 	l.Logger.Printf("Shutting down logger")
+}
+
+func (l *StdoutLogger) Wait() {
+	<-l.done
 }
