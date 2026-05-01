@@ -244,6 +244,7 @@ func (c *Cmd) AddFd(consumers []LineConsumer) {
 // cancelled.
 func consumePipe(ctx context.Context, read io.ReadCloser, consumers []LineConsumer) {
 	scanner := bufio.NewScanner(read)
+	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), 1024*1024)
 	defer func() {
 		for _, c := range consumers {
 			close(c.InputCh())
